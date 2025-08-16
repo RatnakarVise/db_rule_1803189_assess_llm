@@ -28,10 +28,10 @@ class SelectItem(BaseModel):
     target_type: str
     target_name: str
     used_fields: List[str]
-    uggested_fields: List[str]
+    suggested_fields: List[str]
     suggested_statement: Optional[str] = None
 
-    @field_validator("obsolete_calls", "suggested_replacements", mode="before")
+    @field_validator("used_fields", "suggested_statement", mode="before")
     @classmethod
     def no_none(cls, v):
         return [x for x in v if x]
