@@ -1,0 +1,135 @@
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field, field_validator
+from typing import List, Optional
+import os, json
+from langchain_openai import ChatOpenAI
+from langchain.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import JsonOutputParser
+from dotenv import load_dotenv
+
+# --- Load environment ---
+dotenv_path = os.path.join(os.path.dirname(__file__), ".env")
+load_dotenv(dotenv_path=dotenv_path)
+langchain_api_key = os.getenv("LANGCHAIN_API_KEY")
+openai_api_key = os.getenv("OPENAI_API_KEY")
+if langchain_api_key:
+    os.environ["LANGCHAIN_API_KEY"] = langchain_api_key
+if openai_api_key:
+    os.environ["OPENAI_API_KEY"] = openai_api_key
+os.environ["LANGCHAIN_TRACING_V2"] = "true"
+
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5")
+
+app = FastAPI(title="OSS Note 1803189 Assessment & Remediation Prompt")
+
+# ---- Strict input models ----
+class SelectItem(BaseModel):
+    object_type: str
+    object_name: str
+    usage_type: str
+    obsolete_calls: List[str]
+    suggested_replacements: List[str]
+    suggested_code: Optional[str] = None
+
+    @field_validator("obsolete_calls", "suggested_replacements", mode="before")
+    @classmethod
+    def no_none(cls, v):
+        return [x for x in v if x]
+
+class NoteContext(BaseModel):
+    pgm_name: Optional[str] = None
+    inc_name: Optional[str] = None
+    type: Optional[str] = None
+    name: Optional[str] = None
+    bapi_usage: List[SelectItem] = Field(default_factory=list)
+
+# ---- Summarizer ----
+def summarize_context(ctx: NoteContext) -> dict:
+    return {
+        "unit_program": ctx.pgm_name,
+        "unit_include": ctx.inc_name,
+        "unit_type": ctx.type,
+        "unit_name": ctx.name,
+        "bapi_usage": [item.model_dump() for item in ctx.bapi_usage]
+    }
+
+# ---- LangChain Prompt ----
+SYSTEM_MSG = "You are a precise ABAP reviewer familiar with SAP Note 1803189 who outputs strict JSON only."
+
+USER_TEMPLATE = """
+You are evaluating a system context related to SAP OSS Note 1803189 (Obsolete transactions & BAPIs in MM).
+We provide:
+- program/include/type/name metadata
+- list of detected obsolete transaction/BAPI/report usages in code
+
+Your job:
+1) Provide a concise **assessment**:
+   - Risk: BAPI_PO_CREATE, BAPI_REQUISITION_CREATE, ME21, ME51, RM06*47 are obsolete and unsupported in S/4HANA.
+   - Impact: Code using them will break or fail during migration.
+   - Recommend: Replace with BAPI_PO_CREATE1, BAPI_PR_CREATE, ME21N, ME51N, RM06*70.
+
+2) Provide an actionable **LLM remediation prompt**:
+   - Reference program/include/type/name.
+   - Ask to locate all obsolete calls (direct or dynamic SUBMIT/transaction usage).
+   - Replace them with new BAPIs/transactions ensuring functional equivalence.
+   - Require JSON output with keys: original_code_snippet, remediated_code_snippet, changes[] (line/before/after/reason).
+
+Return ONLY strict JSON:
+{{
+  "assessment": "<concise note 1803189 impact>",
+  "llm_prompt": "<prompt for LLM code fixer>"
+}}
+
+Unit metadata:
+- Program: {pgm_name}
+- Include: {inc_name}
+- Unit type: {type}
+- Unit name: {name}
+
+System context:
+{context_json}
+"""
+
+prompt = ChatPromptTemplate.from_messages([
+    ("system", SYSTEM_MSG),
+    ("user", USER_TEMPLATE),
+])
+
+llm = ChatOpenAI(model=OPENAI_MODEL, temperature=0)
+parser = JsonOutputParser()
+chain = prompt | llm | parser
+
+def llm_assess(ctx: NoteContext):
+    ctx_json = json.dumps(summarize_context(ctx), ensure_ascii=False, indent=2)
+    return chain.invoke({
+        "context_json": ctx_json,
+        "pgm_name": ctx.pgm_name,
+        "inc_name": ctx.inc_name,
+        "type": ctx.type,
+        "name": ctx.name
+    })
+
+@app.post("/assess-1803189")
+def assess_note_context(ctxs: List[NoteContext]):
+    results = []
+    for ctx in ctxs:
+        try:
+            llm_result = llm_assess(ctx)
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"LLM call failed: {e}")
+
+        results.append({
+            "pgm_name": ctx.pgm_name,
+            "inc_name": ctx.inc_name,
+            "type": ctx.type,
+            "name": ctx.name,
+            "code": "",  # keep ABAP code outside response
+            "assessment": llm_result.get("assessment", ""),
+            "llm_prompt": llm_result.get("llm_prompt", "")
+        })
+
+    return results
+
+@app.get("/health")
+def health():
+    return {"ok": True, "model": OPENAI_MODEL}
