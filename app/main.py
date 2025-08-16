@@ -24,12 +24,12 @@ app = FastAPI(title="OSS Note 1803189 Assessment & Remediation Prompt")
 
 # ---- Strict input models ----
 class SelectItem(BaseModel):
-    object_type: str
-    object_name: str
-    usage_type: str
-    obsolete_calls: List[str]
-    suggested_replacements: List[str]
-    suggested_code: Optional[str] = None
+    table: str
+    target_type: str
+    target_name: str
+    used_fields: List[str]
+    uggested_fields: List[str]
+    suggested_statement: Optional[str] = None
 
     @field_validator("obsolete_calls", "suggested_replacements", mode="before")
     @classmethod
