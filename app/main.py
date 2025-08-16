@@ -31,10 +31,15 @@ class SelectItem(BaseModel):
     suggested_fields: List[str]
     suggested_statement: Optional[str] = None
 
-    @field_validator("used_fields", "suggested_statement", mode="before")
+    @field_validator("used_fields", mode="before")
     @classmethod
-    def no_none(cls, v):
+    def clean_used_fields(cls, v):
         return [x for x in v if x]
+
+    @field_validator("suggested_statement", mode="before")
+    @classmethod
+    def clean_suggested_statement(cls, v):
+        return v if v is not None and v != "" else None
 
 class NoteContext(BaseModel):
     pgm_name: Optional[str] = None
