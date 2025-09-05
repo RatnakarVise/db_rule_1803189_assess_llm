@@ -77,7 +77,6 @@ Your job:
    - Reference program/include/type/name.
    - Ask to locate all obsolete calls (direct or dynamic SUBMIT/transaction usage).
    - Replace them with new BAPIs/transactions ensuring functional equivalence.
-   - Require JSON output with keys: original_code_snippet, remediated_code_snippet, changes[] (line/before/after/reason).
 
 Return ONLY strict JSON:
 {{
