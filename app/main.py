@@ -30,6 +30,7 @@ class SelectItem(BaseModel):
     used_fields: List[str]
     suggested_fields: List[str]
     suggested_statement: Optional[str] = None
+    snippet: Optional[str] = None 
 
     @field_validator("used_fields", mode="before")
     @classmethod
@@ -59,8 +60,11 @@ def summarize_context(ctx: NoteContext) -> dict:
     }
 
 # ---- LangChain Prompt ----
-SYSTEM_MSG = "You are a precise ABAP reviewer familiar with SAP Note 1803189 who outputs strict JSON only."
-
+SYSTEM_MSG = """You are a precise ABAP reviewer familiar with SAP Note 1803189 who outputs strict JSON only."
+You are evaluating a system context related to SAP OSS Note 1803189. We provide:
+- system context
+- list of detected changes in code (with offending code snippets when available)
+"""
 USER_TEMPLATE = """
 You are evaluating a system context related to SAP OSS Note 1803189 (Obsolete transactions & BAPIs in MM).
 We provide:
